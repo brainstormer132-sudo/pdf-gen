@@ -1,149 +1,37 @@
-from docxtpl import DocxTemplate
-import pandas as pd
+import json
 import os
 import re
-from datetime import datetime
-from num2words import num2words
-from docx2pdf import convert
-import time
-import random
 import shutil
-import json
-
-def generate_contract_from_gui(context):
-
-    # reuse your existing logic variables
-    global last_number
-    global generated_excel_path
-    global archive_dir
-    global output_dir
-    global temp_convert_dir
-
-
-    # ===== SAME ID LOGIC =====
-
-    brand_id = get_brand_id(context.get("brand_name", ""))
-
-    last_number += 1
-
-    contract_id = f"CTR{brand_id}{last_number:06d}"
-
-    context["id"] = contract_id
-
-
-    # ===== SAME TEMPLATE =====
-
-    contract_key = re.sub(r"\s+", "_", context.get("contract_type", "").lower())
-
-    template_path = TEMPLATE_MAP.get(contract_key, STANDARD_TEMPLATE)
-
-    doc = DocxTemplate(template_path)
-
-
-    # ===== SAVE DOCX =====
-
-    filename = safe_filename(contract_id)
-
-    docx_path = os.path.join(archive_dir, f"{filename}.docx")
-
-    doc.render(context)
-
-    doc.save(docx_path)
-
-
-    # ===== PDF =====
-
-    convert(docx_path)
-
-
-    # ===== SAVE EXCEL =====
-
-    new_row = pd.DataFrame([context])
-
-    if os.path.exists(generated_excel_path):
-
-        existing = pd.read_excel(generated_excel_path)
-
-        new_row = pd.concat([existing, new_row], ignore_index=True)
-
-    new_row.to_excel(generated_excel_path, index=False)
-
-
-    return contract_id
-
+from datetime import datetime
+from pathlib import Path
 
 # =================================================
 # CONFIGURATION
 # =================================================
-excel_path = r"C:\Users\siraj\OneDrive - AQ Creativity\contracts.xlsx"
-output_dir = r"C:\Users\siraj\OneDrive - AQ Creativity\CONTRACTS"
-temp_convert_dir = r"C:\Users\siraj\OneDrive - AQ Creativity\TEMP"
-progress_file = r"C:\Users\siraj\PycharmProjects\automation\last_row.txt"
-skipped_file = r"C:\Users\siraj\PycharmProjects\automation\skipped_rows.txt"
-generated_excel_path = r"C:\Users\siraj\OneDrive - AQ Creativity\generated.xlsx"
-archive_dir = r"C:\Users\siraj\OneDrive - AQ Creativity\ARCHIVE"
-brand_id_file = r"C:\Users\siraj\OneDrive - AQ Creativity\brand_ids.json"
+APP_DIR = Path(__file__).resolve().parent
+CONFIG_PATH = APP_DIR / "contract_config.json"
 
+PREFERRED_OUTPUT_DIR = r"C:\Users\siraj\OneDrive - AQ Creativity\CONTRACTS"
+LEGACY_DEFAULT_OUTPUT_DIR = str(APP_DIR / "output")
 
-START_DATA_ROW = 2
-os.makedirs(output_dir, exist_ok=True)
-os.makedirs(temp_convert_dir, exist_ok=True)
-
-# =================================================
-# CLEAN TEMP FOLDER (SAFETY)
-# =================================================
-for f in os.listdir(temp_convert_dir):
-    try:
-        os.remove(os.path.join(temp_convert_dir, f))
-    except Exception:
-        pass
-
-# =================================================
-# TEMPLATE SELECTION
-# =================================================
-TEMPLATE_MAP = {
-    "after_pay": r"C:\Users\siraj\PycharmProjects\automation\templates\Contract template(2).docx",
-    "pre_pay": r"C:\Users\siraj\PycharmProjects\automation\templates\advance payment contract .docx",
-    "savola": r"C:\Users\siraj\PycharmProjects\automation\templates\Savola Contract  FULL.docx",
-    "pre_savola": r"C:\Users\siraj\PycharmProjects\automation\templates\Savola Contract advance .docx",
-    "crispy": r"C:\Users\siraj\PycharmProjects\automation\templates\UGC Crispy Contract  .docx",
-    "santia": r"C:\Users\siraj\PycharmProjects\automation\templates\Santia Contract  (1).docx",
-    "free_lancer": r"C:\Users\siraj\PycharmProjects\automation\templates\Freelancer Contract .docx",
+DEFAULT_CONFIG = {
+    "output_dir": PREFERRED_OUTPUT_DIR,
+    "temp_convert_dir": str(APP_DIR / "temp"),
+    "generated_excel_path": str(APP_DIR / "generated.xlsx"),
+    "archive_dir": str(APP_DIR / "archive"),
+    "brand_id_file": str(APP_DIR / "brand_ids.json"),
+    "template_map": {
+        "after_pay": str(APP_DIR / "templates" / "Contract template(2).docx"),
+        "pre_pay": str(APP_DIR / "templates" / "advance payment contract .docx"),
+        "savola": str(APP_DIR / "templates" / "Savola Contract  FULL.docx"),
+        "pre_savola": str(APP_DIR / "templates" / "Savola Contract advance .docx"),
+        "crispy": str(APP_DIR / "templates" / "UGC Crispy Contract  .docx"),
+        "santia": str(APP_DIR / "templates" / "Santia Contract  (1).docx"),
+        "free_lancer": str(APP_DIR / "templates" / "Freelancer Contract .docx"),
+    },
+    "standard_template_key": "after_pay",
 }
 
-STANDARD_TEMPLATE = TEMPLATE_MAP["after_pay"]
-
-# ==========================================a=======
-# RESUME POINT
-# =================================================
-if os.path.exists(progress_file):
-    with open(progress_file, "r") as f:
-        last_row = int(f.read().strip())
-else:
-    last_row = START_DATA_ROW - 1
-
-# =================================================
-# LOAD EXCEL
-# =================================================
-df = pd.read_excel(
-    excel_path,
-    sheet_name="Live",
-    dtype=str
-)
-
-df.columns = (
-    df.columns.str.strip()
-    .str.lower()
-    .str.replace(" ", "_")
-    .str.replace(r"[()]", "", regex=True)
-)
-
-if "ad_type" in df.columns:
-    df["ad_types"] = df["ad_type"]
-
-# =================================================
-# MAPS
-# =================================================
 PLATFORM_MAP = {
     "instagram": "إنستقرام",
     "insta": "إنستقرام",
@@ -153,13 +41,14 @@ PLATFORM_MAP = {
     "snapchat": "سناب شات",
     "snap chat": "سناب شات",
     "snap": "سناب شات",
-    "kick": "كيك"
+    "kick": "كيك",
+    "youtube": "يوتيوب",
 }
 
 AD_TYPE_MAP = {
     "multi service": "خدمة متعددة",
     "home ad": "إعلان منزلي",
-    "store visit": "إعلان زيارة"
+    "store visit": "إعلان زيارة",
 }
 
 ARABIC_DAYS = {
@@ -169,21 +58,93 @@ ARABIC_DAYS = {
     "Thursday": "الخميس",
     "Friday": "الجمعة",
     "Saturday": "السبت",
-    "Sunday": "الأحد"
+    "Sunday": "الأحد",
 }
 
-# =================================================
-# DATE
-# =================================================
-today = datetime.today()
-today_date = today.strftime("%d/%m/%Y")
-today_day_ar = ARABIC_DAYS.get(today.strftime("%A"), today.strftime("%A"))
+last_number = 0
+_runtime = None
 
-# =================================================
-# HELPERS
-# =================================================
+
+def _require(dep_name: str, install_hint: str):
+    try:
+        return __import__(dep_name)
+    except Exception as exc:
+        raise RuntimeError(f"Missing dependency '{dep_name}'. Install with: {install_hint}") from exc
+
+
+def load_config():
+    if not CONFIG_PATH.exists():
+        CONFIG_PATH.write_text(json.dumps(DEFAULT_CONFIG, indent=2, ensure_ascii=False), encoding="utf-8")
+        return DEFAULT_CONFIG.copy()
+
+    raw = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
+    config = DEFAULT_CONFIG.copy()
+    config.update({k: v for k, v in raw.items() if k in config and k != "template_map"})
+
+    # Respect user-managed template list as source of truth.
+    # If template_map exists in config file, use it directly.
+    # Otherwise, fall back to defaults for first-run compatibility.
+    template_map = raw.get("template_map")
+    if isinstance(template_map, dict) and template_map:
+        config["template_map"] = template_map
+    else:
+        config["template_map"] = DEFAULT_CONFIG["template_map"].copy()
+
+    # keep standard key valid
+    if config.get("standard_template_key") not in config["template_map"]:
+        config["standard_template_key"] = next(iter(config["template_map"]))
+
+    # Backward compatibility: if an old config still points to local ./output default,
+    # move it to the requested AQ Creativity OneDrive contracts folder.
+    if config.get("output_dir") in {"", LEGACY_DEFAULT_OUTPUT_DIR}:
+        config["output_dir"] = PREFERRED_OUTPUT_DIR
+        raw["output_dir"] = PREFERRED_OUTPUT_DIR
+        CONFIG_PATH.write_text(json.dumps({**raw, "template_map": config["template_map"]}, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    return config
+
+
+def _runtime_paths():
+    global _runtime
+    if _runtime is not None:
+        return _runtime
+
+    conf = load_config()
+    output_dir = Path(conf["output_dir"])
+    temp_convert_dir = Path(conf["temp_convert_dir"])
+    generated_excel_path = Path(conf["generated_excel_path"])
+    archive_dir = Path(conf["archive_dir"])
+    brand_id_file = Path(conf["brand_id_file"])
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    temp_convert_dir.mkdir(parents=True, exist_ok=True)
+    archive_dir.mkdir(parents=True, exist_ok=True)
+
+    for f in temp_convert_dir.iterdir():
+        if f.is_file():
+            try:
+                f.unlink()
+            except Exception:
+                pass
+
+    template_map = conf["template_map"]
+    standard_template = template_map.get(conf.get("standard_template_key", "after_pay"), template_map["after_pay"])
+
+    _runtime = {
+        "output_dir": output_dir,
+        "temp_convert_dir": temp_convert_dir,
+        "generated_excel_path": generated_excel_path,
+        "archive_dir": archive_dir,
+        "brand_id_file": brand_id_file,
+        "template_map": template_map,
+        "standard_template": standard_template,
+    }
+    return _runtime
+
+
 def safe_filename(text):
     return re.sub(r'[\\/*?:"<>|]', "", str(text)).strip()
+
 
 def unique_path(path):
     base, ext = os.path.splitext(path)
@@ -194,8 +155,8 @@ def unique_path(path):
         counter += 1
     return new_path
 
-def normalize_channel_name(raw):
 
+def normalize_channel_name(raw):
     if not raw:
         return ""
 
@@ -203,59 +164,38 @@ def normalize_channel_name(raw):
     result = []
 
     for entry in entries:
-
-        # Case 1: Platform + name
         if ":" in entry:
-
             platform_raw, name = entry.split(":", 1)
-
-            platform_key = platform_raw.strip().lower()
-            platform_ar = PLATFORM_MAP.get(platform_key, platform_raw.strip())
-
-            name = name.strip().replace("@", "")
-
-            result.append(f"{platform_ar}: {name}")
-
-        # Case 2: Name only
+            platform_label = platform_raw.strip()
+            clean_name = name.strip().replace("@", "")
+            result.append(f"{platform_label}: @{clean_name}")
         else:
-
-            name = entry.replace("@", "").strip()
-
-            result.append(f"@{name}")
+            clean_name = entry.replace("@", "").strip()
+            result.append(f"@{clean_name}")
 
     return "\n".join(result)
 
 
-
-
 def get_brand_id(brand_name):
+    runtime = _runtime_paths()
+    brand_id_file = runtime["brand_id_file"]
+
     brand_key = re.sub(r"[^A-Za-z0-9]", "", str(brand_name).upper())
 
-    # Load existing brand IDs
-    if os.path.exists(brand_id_file):
-        with open(brand_id_file, "r") as f:
-            brand_map = json.load(f)
+    if brand_id_file.exists():
+        brand_map = json.loads(brand_id_file.read_text(encoding="utf-8"))
     else:
         brand_map = {}
 
-    # If brand already exists → return its ID
     if brand_key in brand_map:
         return brand_map[brand_key]
 
-    # Assign new ID automatically
-    if brand_map:
-        max_id = max(int(v) for v in brand_map.values())
-        new_id = str(max_id + 1)
-    else:
-        new_id = "1"
-
+    new_id = str(max((int(v) for v in brand_map.values()), default=0) + 1)
     brand_map[brand_key] = new_id
-
-    # Save updated map
-    with open(brand_id_file, "w") as f:
-        json.dump(brand_map, f, indent=4)
+    brand_id_file.write_text(json.dumps(brand_map, indent=4, ensure_ascii=False), encoding="utf-8")
 
     return new_id
+
 
 def normalize_platform(raw):
     if not raw:
@@ -269,243 +209,161 @@ def normalize_platform(raw):
             seen.add(p)
     return " و ".join(result)
 
-def missing_reason(ctx):
-    checks = {
-        "influencer_name_as_per_license": "missing name",
-        "license_number": "missing license",
-        "bank_name": "missing bank name",
-        "account_name": "missing account name",
-        "iban": "missing IBAN",
-        "account_number": "missing account number",
-        "channel_name": "missing channel",
-        "platform": "missing platform",
-        "amount": "missing amount",
-    }
-    for k, msg in checks.items():
-        if not ctx.get(k, "").strip():
-            return msg
-    return None
 
-# =================================================
-# PROCESS CONTRACTS
-# =================================================
-skipped_rows = []
-start_time = time.time()
-generated = 0
-generated_rows = []
-new_docx_files = []
-last_number = 0
+def _load_last_number_from_generated_sheet():
+    runtime = _runtime_paths()
+    generated_excel_path = runtime["generated_excel_path"]
+    if not generated_excel_path.exists():
+        return 0
 
+    pd = _require("pandas", "pip install pandas openpyxl")
 
-existing_ids = set()
-
-if os.path.exists(generated_excel_path):
     df_existing = pd.read_excel(generated_excel_path, dtype=str)
-    if "ID" in df_existing.columns:
-        ids = df_existing["ID"].dropna().astype(str)
-        nums = ids.str.extract(r"(\d{6})$")[0]
-        nums = nums.dropna().astype(int)
-        if not nums.empty:
-            last_number = nums.max()
-        else:
-            last_number = 0
-else:
-    last_number = 0
+
+    id_column = None
+    for candidate in ("ID", "id"):
+        if candidate in df_existing.columns:
+            id_column = candidate
+            break
+
+    if not id_column:
+        return 0
+
+    ids = df_existing[id_column].dropna().astype(str)
+    nums = ids.str.extract(r"(\d{6})$")[0].dropna().astype(int)
+    return int(nums.max()) if not nums.empty else 0
 
 
-for excel_row in range(last_row + 1, len(df) + START_DATA_ROW):
-    row = df.iloc[excel_row - START_DATA_ROW]
-    context = {k: str(v).strip() for k, v in row.fillna("").items()}
+def _compose_amount_full(raw_amount: str) -> str:
+    num2words_module = _require("num2words", "pip install num2words")
+    num2words = getattr(num2words_module, "num2words")
 
-    # ===== SKIP CHECK =====
-    reason = missing_reason(context)
-    if reason:
-        skipped_rows.append(excel_row)
-        with open(skipped_file, "a", encoding="utf-8") as f:
-            f.write(f"Row {excel_row} skipped – {reason}\n")
-        with open(progress_file, "w") as f:
-            f.write(str(excel_row))
-        continue
+    clean = str(raw_amount).replace(",", "").strip()
+    if not clean or clean == ".":
+        raise ValueError("invalid amount")
 
-    # ===== TEMPLATE SELECTION =====
-    contract_key = re.sub(r"\s+", "_", context.get("contract_type", "").lower())
-    template_path = TEMPLATE_MAP.get(contract_key, STANDARD_TEMPLATE)
-    doc = DocxTemplate(template_path)
-
-    # ===== CONTEXT SETUP =====
-    full_name = context["influencer_name_as_per_license"]
-    parts = full_name.split()
-    context["name"] = full_name
-    context["license_name"] = full_name
-    context["name_2"] = f"{parts[0]} {parts[-1]}" if len(parts) >= 2 else full_name
-    context["channel_name"] = normalize_channel_name(context["channel_name"])
-    context["platform"] = normalize_platform(context["platform"])
-    context["platform_smart"] = context["platform"]
-
-    raw_ad = context.get("ad_types", "")
-    if raw_ad:
-        pieces = [p.strip() for p in raw_ad.split(",")]
-        key = pieces[0].lower()
-        qty = pieces[1] if len(pieces) > 1 and pieces[1].isdigit() else ""
-        ad_ar = AD_TYPE_MAP.get(key, pieces[0])
-        context["ad_types"] = f'{ad_ar} "{qty}"' if qty else ad_ar
-
-    context["date"] = today_date
-    context["day"] = f"({today_day_ar})"
-
-    # ===== AMOUNT PROCESSING (HALALA + RTL) =====
-    raw_amount = context.get("amount", "").replace(",", "").strip()
-    if not raw_amount or raw_amount == ".":
-        skipped_rows.append(excel_row)
-        with open(skipped_file, "a", encoding="utf-8") as f:
-            f.write(f"Row {excel_row} skipped – invalid amount\n")
-        with open(progress_file, "w") as f:
-            f.write(str(excel_row))
-        continue
-
-    if "." in raw_amount:
-        r_str, h_str = raw_amount.split(".", 1)
+    if "." in clean:
+        r_str, h_str = clean.split(".", 1)
         h_str = (h_str + "00")[:2]
     else:
-        r_str = raw_amount
+        r_str = clean
         h_str = "00"
 
     if not r_str.isdigit() or not h_str.isdigit():
-        skipped_rows.append(excel_row)
-        with open(skipped_file, "a", encoding="utf-8") as f:
-            f.write(f"Row {excel_row} skipped – non-numeric amount\n")
-        with open(progress_file, "w") as f:
-            f.write(str(excel_row))
-        continue
+        raise ValueError("non-numeric amount")
 
     r = int(r_str)
     h = int(h_str)
+
     amount_words = num2words(r, lang="ar") + " ريال سعودي"
     if h > 0:
         amount_words += " و " + num2words(h, lang="ar") + " هللة"
 
     amount_number = f"({r}.{h_str})" if h > 0 else f"({r})"
-    RTL_START = "\u202B"
-    RTL_END = "\u202C"
-    context["Amount_full"] = RTL_START + f"{amount_number} {amount_words}" + RTL_END
+    rtl_start = "\u202B"
+    rtl_end = "\u202C"
+    return rtl_start + f"{amount_number} {amount_words}" + rtl_end
 
-    # ===== SAVE DOCX =====
-    brand_id = get_brand_id(context.get("brand_name", ""))
 
+def _validate_template_path(template_path: str):
+    if not Path(template_path).exists():
+        raise FileNotFoundError(f"Template file not found: {template_path}")
+
+
+def generate_contract_from_gui(context):
+    global last_number
+    runtime = _runtime_paths()
+
+    pd = _require("pandas", "pip install pandas openpyxl")
+    docxtpl_module = _require("docxtpl", "pip install docxtpl")
+    docx2pdf_module = _require("docx2pdf", "pip install docx2pdf")
+
+    DocxTemplate = getattr(docxtpl_module, "DocxTemplate")
+    convert = getattr(docx2pdf_module, "convert")
+
+    if last_number == 0:
+        last_number = _load_last_number_from_generated_sheet()
+
+    today = datetime.today()
+    today_date = today.strftime("%d/%m/%Y")
+    today_day_ar = ARABIC_DAYS.get(today.strftime("%A"), today.strftime("%A"))
+
+    ctx = {k: str(v).strip() for k, v in (context or {}).items()}
+
+    full_name = ctx.get("influencer_name_as_per_license", "")
+    parts = full_name.split()
+    ctx["name"] = full_name
+    ctx["license_name"] = full_name
+    ctx["name_2"] = f"{parts[0]} {parts[-1]}" if len(parts) >= 2 else full_name
+    ctx["channel_name"] = normalize_channel_name(ctx.get("channel_name", ""))
+    ctx["platform"] = normalize_platform(ctx.get("platform", ""))
+    ctx["platform_smart"] = ctx["platform"]
+
+    raw_ad = ctx.get("ad_types", "")
+    if raw_ad:
+        pieces = [p.strip() for p in raw_ad.split(",")]
+        key = pieces[0].lower()
+        qty = pieces[1] if len(pieces) > 1 and pieces[1].isdigit() else ""
+        ad_ar = AD_TYPE_MAP.get(key, pieces[0])
+        ctx["ad_types"] = f'{ad_ar} "{qty}"' if qty else ad_ar
+
+    ctx["date"] = today_date
+    ctx["day"] = f"({today_day_ar})"
+    ctx["Amount_full"] = _compose_amount_full(ctx.get("amount", ""))
+
+    brand_id = get_brand_id(ctx.get("brand_name", ""))
     last_number += 1
     contract_id = f"CTR{brand_id}{last_number:06d}"
+    ctx["id"] = contract_id
 
-    context["id"] = contract_id
-    context["date"] = today_date
+    contract_key = re.sub(r"\s+", "_", ctx.get("contract_type", "").lower())
+    template_path = runtime["template_map"].get(contract_key, runtime["standard_template"])
+    _validate_template_path(template_path)
 
+    doc = DocxTemplate(template_path)
     filename = safe_filename(contract_id)
-    os.makedirs(archive_dir, exist_ok=True)
-    docx_path = os.path.join(archive_dir, f"{filename}.docx")
-    docx_path = unique_path(docx_path)
-
-    doc.render(context)
+    docx_path = unique_path(str(runtime["archive_dir"] / f"{filename}.docx"))
+    doc.render(ctx)
     doc.save(docx_path)
-    new_docx_files.append(docx_path)
 
-    # ===== COLLECT GENERATED ROW =====
-    output_row = context.copy()
-    output_row["id"] = contract_id
-    output_row["date"] = today_date
-    generated_rows.append(output_row)
+    shutil.copy(docx_path, str(runtime["temp_convert_dir"] / Path(docx_path).name))
+    convert(str(runtime["temp_convert_dir"]))
 
-    # ===== PROGRESS UPDATE =====
-    with open(progress_file, "w") as f:
-        f.write(str(excel_row))
+    today_folder = runtime["output_dir"] / today.strftime("%Y-%m-%d")
+    today_folder.mkdir(parents=True, exist_ok=True)
 
-    print(f"[{excel_row}] {full_name} — {context.get('brand_name','')} — {context.get('amount','')} SAR ✔")
-    generated += 1
+    for f in runtime["temp_convert_dir"].iterdir():
+        if f.suffix.lower() == ".pdf":
+            os.replace(str(f), str(today_folder / f.name))
+        elif f.is_file():
+            f.unlink()
 
+    output_row = pd.DataFrame([ctx])
+    ordered_cols = [
+        "id",
+        "influencer_name_as_per_license",
+        "license_number",
+        "city_as_per_license",
+        "neighbourhood_as_per_license",
+        "brand_name",
+        "platform",
+        "channel_name",
+        "ad_types",
+        "amount",
+        "bank_name",
+        "account_name",
+        "iban",
+        "account_number",
+        "swift_code",
+        "contract_type",
+        "date",
+    ]
+    output_row = output_row.reindex(columns=ordered_cols)
 
-# =================================================
-# PDF CONVERSION (ONLY NEW FILES)
-# =================================================
-# =================================================
-# PDF CONVERSION (TRUE BATCH)
-# =================================================
+    if runtime["generated_excel_path"].exists():
+        existing = pd.read_excel(runtime["generated_excel_path"], dtype=str)
+        output_row = pd.concat([existing, output_row], ignore_index=True)
 
-if new_docx_files:
+    output_row.to_excel(runtime["generated_excel_path"], index=False)
 
-    # Copy only new files into temp folder
-    for docx_file in new_docx_files:
-        shutil.copy(
-            docx_file,
-            os.path.join(temp_convert_dir, os.path.basename(docx_file))
-        )
-
-    # Batch convert entire temp folder
-    convert(temp_convert_dir)
-
-    # Move generated PDFs
-    today_folder = os.path.join(output_dir, today.strftime("%Y-%m-%d"))
-    os.makedirs(today_folder, exist_ok=True)
-
-    for f in os.listdir(temp_convert_dir):
-        full_path = os.path.join(temp_convert_dir, f)
-
-        if f.lower().endswith(".pdf"):
-            os.replace(
-                full_path,
-                os.path.join(today_folder, f)
-            )
-        else:
-            os.remove(full_path)
-
-
-# =================================================
-# END-OF-RUN SUMMARY
-# =================================================
-elapsed = round(time.time() - start_time, 2)
-print("\n📊 RUN SUMMARY")
-print(f"Generated: {generated}")
-print(f"Skipped: {len(skipped_rows)}")
-print(f"Time: {elapsed} seconds")
-
-generated_df = pd.DataFrame(generated_rows)
-
-ordered_cols = [
-    "id",
-    "influencer_name_as_per_license",
-    "license_number",
-    "city_as_per_license",
-    "neighbourhood_as_per_license",
-    "brand_name",
-    "platform",
-    "channel_name",
-    "ad_types",
-    "amount",
-    "bank_name",
-    "account_name",
-    "iban",
-    "account_number",
-    "swift_code",
-    "contract_type",
-    "date",
-]
-
-generated_df = generated_df.reindex(columns=ordered_cols)
-
-# =================================================
-# WRITE GENERATED OUTPUT TO SEPARATE EXCEL
-# =================================================
-
-if os.path.exists(generated_excel_path):
-    existing_df = pd.read_excel(generated_excel_path, dtype=str)
-    generated_df = pd.concat([existing_df, generated_df], ignore_index=True)
-
-generated_df.to_excel(
-    generated_excel_path,
-    index=False
-)
-
-
-# =================================================
-# AUTO-OPEN OUTPUT FOLDER
-# =================================================
-os.startfile(output_dir)
-
-print("🎉 DONE — ALL CONTRACTS GENERATED SAFELY")
+    return contract_id
